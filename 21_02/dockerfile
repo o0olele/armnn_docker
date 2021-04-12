@@ -1,0 +1,202 @@
+FROM ubuntu:16.04
+ENV TERM linux
+ENV DEBIAN_FRONTEND noninteractive
+
+# apt
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends locales ca-certificates &&  rm -rf /var/lib/apt/lists/*
+
+# 设置
+RUN locale-gen en_US.UTF-8 && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+ENV LANG en_US.UTF-8
+ENV LC_ALL en_US.UTF-8
+
+# 关闭权限验证
+RUN echo "check_certificate = off" >> ~/.wgetrc
+RUN echo "[global] \n\
+trusted-host = pypi.python.org \n \
+\t               pypi.org \n \
+\t              files.pythonhosted.org" >> /etc/pip.conf
+
+# 安装基础包
+RUN apt-get update && apt-get install -y \
+    software-properties-common \
+    apparmor \
+    aufs-tools \
+    automake \
+    bash-completion \
+    btrfs-tools \
+    build-essential \
+    cmake \
+    createrepo \
+    curl \
+    dpkg-sig \
+    g++ \
+    gcc \
+    git \
+    iptables \
+    jq \
+    libapparmor-dev \
+    libc6-dev \
+    libcap-dev \
+    libsystemd-dev \
+    libyaml-dev \
+    mercurial \
+    net-tools \
+    parallel \
+    pkg-config \
+    python-dev \
+    python-mock \
+    python-pip \
+    python-setuptools \
+    python-websocket \
+    golang-go \
+    iproute2 \
+    iputils-ping \
+    vim-common \
+    vim \
+    wget \
+    libtool \
+    unzip \
+    scons \
+    curl \
+    autoconf \
+    libtool \
+    build-essential \
+    g++ \ 
+    cmake && rm -rf /var/lib/apt/lists/*
+
+# 安装交叉编译工具链
+RUN apt-get update && apt-get install -y crossbuild-essential-arm64
+
+# 创建工作目录
+RUN cd $HOME && mkdir armnn-devenv
+
+# 安装scons
+RUN cd $HOME && \
+    wget https://sourceforge.net/projects/scons/files/scons/2.4.1/scons-2.4.1.tar.gz && \
+    tar xf scons-2.4.1.tar.gz && \
+    cd scons-2.4.1 && \
+    python setup.py install
+
+# 获取指定版本的aarch-linux-gnu
+RUN cd $HOME && \
+    wget https://releases.linaro.org/components/toolchain/binaries/6.3-2017.05/aarch64-linux-gnu/gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu.tar.xz && \
+    tar -xf gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu.tar.xz && \
+    mv ./gcc-linaro-6.3.1-2017.05-x86_64_aarch64-linux-gnu linaro-gcc && \
+    export PATH=$HOME/linaro-gcc/bin:$PATH
+
+# 建立软链接(这一步是在构建flatc的时候，出现类似"/lib/ld-linux-aarch64.so.1: No such file or directory"的错误的解决)
+RUN ln -s $HOME/linaro-gcc/aarch64-linux-gnu/libc/lib/ld-linux-aarch64.so.1 /lib/ld-linux-aarch64.so.1 && \
+    ln -s $HOME/linaro-gcc/aarch64-linux-gnu/libc/lib/libstdc++.so.6 /lib/libstdc++.so.6 && \
+    ln -s $HOME/linaro-gcc/aarch64-linux-gnu/libc/lib/libm.so.6 /lib/libm.so.6 && \
+    ln -s $HOME/linaro-gcc/aarch64-linux-gnu/libc/lib/libgcc_s.so.1 /lib/libgcc_s.so.1 && \
+    ln -s $HOME/linaro-gcc/aarch64-linux-gnu/libc/lib/libc.so.6 /lib/libc.so.6
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv && \
+    git clone -b v3.12.0 https://gitee.com/arcy/protobuf.git protobuf && \
+    cd protobuf && \
+    git submodule update --init --recursive && \
+    ./autogen.sh
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv/protobuf && \
+    mkdir x86_64_build && \
+    cd x86_64_build && \
+    ../configure --prefix=$HOME/armnn-devenv/google/x86_64_pb_install && \
+    make install -j16
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv/protobuf && \
+    mkdir arm64_build && \
+    cd arm64_build && \
+    CC=aarch64-linux-gnu-gcc \
+    CXX=aarch64-linux-gnu-g++ \
+    ../configure --host=aarch64-linux \
+    --prefix=$HOME/armnn-devenv/google/arm64_pb_install \
+    --with-protoc=$HOME/armnn-devenv/google/x86_64_pb_install/bin/protoc && \
+    make install -j16
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv  && \
+    wget https://dl.bintray.com/boostorg/release/1.64.0/source/boost_1_64_0.tar.bz2 && \
+    tar xf boost_1_64_0.tar.bz2  && \
+    cd boost_1_64_0  && \
+    echo "using gcc : arm : aarch64-linux-gnu-g++ ;" > user_config.jam  && \
+    ./bootstrap.sh --prefix=$HOME/armnn-devenv/boost_arm64_install  && \
+    ./b2 install toolset=gcc-arm link=static cxxflags=-fPIC --with-test --with-log --with-program_options -j32 --user-config=user_config.jam
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv && \
+    git clone https://github.com/ARM-software/ComputeLibrary.git && \
+    cd ComputeLibrary/ && \
+    git checkout v21.02 && \
+    scons arch=arm64-v8a neon=1 opencl=1 embed_kernels=1 extra_cxx_flags="-fPIC" -j4 internal_only=0
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv && \
+    git clone https://gitee.com/rick_liang/armnn.git && \
+    cd armnn && \
+    git checkout branches/armnn_21_02 && \
+    git pull
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv && \
+    git clone https://gitee.com/mirrors/tensorflow.git && \
+    cd tensorflow/ && \
+    git checkout fcc4b966f1265f466e82617020af93670141b009 && \
+    ../armnn/scripts/generate_tensorflow_protobuf.sh ../tensorflow-protobuf ../google/x86_64_pb_install
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv && \
+    wget -O flatbuffers-1.12.0.tar.gz https://github.com/google/flatbuffers/archive/v1.12.0.tar.gz && \
+    tar xf flatbuffers-1.12.0.tar.gz && \
+    cd flatbuffers-1.12.0 && \
+    rm -f CMakeCache.txt && \
+    mkdir build && \
+    cd build && \
+    cmake .. -DFLATBUFFERS_BUILD_FLATC=1 -DCMAKE_INSTALL_PREFIX:PATH=$HOME/armnn-devenv/flatbuffers -DFLATBUFFERS_BUILD_TESTS=0 && \
+    make all install && \
+    cd .. && \
+    mkdir build-arm64 && \
+    cd build-arm64 && \
+    CXXFLAGS="-fPIC" cmake .. -DCMAKE_C_COMPILER=$HOME/linaro-gcc/bin/aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=$HOME/linaro-gcc/bin/aarch64-linux-gnu-g++ -DFLATBUFFERS_BUILD_FLATC=1 -DCMAKE_INSTALL_PREFIX:PATH=$HOME/armnn-devenv/flatbuffers-arm64 -DFLATBUFFERS_BUILD_TESTS=0 && \
+    make all install
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv && \
+    git clone https://github.com/onnx/onnx.git && \
+    cd onnx && \
+    git fetch https://github.com/onnx/onnx.git 553df22c67bee5f0fe6599cff60f1afc6748c635 && git checkout FETCH_HEAD && \
+    LD_LIBRARY_PATH=$HOME/armnn-devenv/google/x86_64_pb_install/lib:$LD_LIBRARY_PATH \
+    $HOME/armnn-devenv/google/x86_64_pb_install/bin/protoc \
+    onnx/onnx.proto --proto_path=. --proto_path=../google/x86_64_pb_install/include --cpp_out $HOME/armnn-devenv/onnx
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv && \
+    mkdir tflite && \
+    cd tflite && \
+    cp ../tensorflow/tensorflow/lite/schema/schema.fbs . && \
+    ../flatbuffers-1.12.0/build/flatc -c --gen-object-api --reflect-types --reflect-names schema.fbs
+
+RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
+    cd $HOME/armnn-devenv/armnn && \
+    mkdir build && \
+    cd build && \
+    CXX=aarch64-linux-gnu-g++ CC=aarch64-linux-gnu-gcc cmake .. \
+    -DARMCOMPUTE_ROOT=$HOME/armnn-devenv/ComputeLibrary \
+    -DARMCOMPUTE_BUILD_DIR=$HOME/armnn-devenv/ComputeLibrary/build/ \
+    -DBOOST_ROOT=$HOME/armnn-devenv/boost_arm64_install/ \
+    -DARMCOMPUTENEON=1 -DARMCOMPUTECL=1 -DARMNNREF=1 \
+    -DONNX_GENERATED_SOURCES=$HOME/armnn-devenv/onnx \
+    -DBUILD_ONNX_PARSER=1 \
+    -DTF_GENERATED_SOURCES=$HOME/armnn-devenv/tensorflow-protobuf \
+    -DBUILD_TF_PARSER=1 \
+    -DBUILD_TF_LITE_PARSER=1 \
+    -DTF_LITE_GENERATED_PATH=$HOME/armnn-devenv/tflite \
+    -DFLATBUFFERS_ROOT=$HOME/armnn-devenv/flatbuffers-arm64 \
+    -DFLATC_DIR=$HOME/armnn-devenv/flatbuffers-1.12.0/build \
+    -DPROTOBUF_ROOT=$HOME/armnn-devenv/google/x86_64_pb_install \
+    -DPROTOBUF_ROOT=$HOME/armnn-devenv/google/x86_64_pb_install/ \
+    -DPROTOBUF_LIBRARY_DEBUG=$HOME/armnn-devenv/google/arm64_pb_install/lib/libprotobuf.so.23.0.0 \
+    -DPROTOBUF_LIBRARY_RELEASE=$HOME/armnn-devenv/google/arm64_pb_install/lib/libprotobuf.so.23.0.0
