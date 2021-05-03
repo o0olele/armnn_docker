@@ -205,3 +205,7 @@ RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
     -DPROTOBUF_LIBRARY_DEBUG=$HOME/armnn-devenv/google/arm64_pb_install/lib/libprotobuf.so.23.0.0 \
     -DPROTOBUF_LIBRARY_RELEASE=$HOME/armnn-devenv/google/arm64_pb_install/lib/libprotobuf.so.23.0.0 && \
     make -j8
+
+RUN cd $HOME/armnn-devenv/armnn && \
+	cp -r include ./build && \
+	tar -zcvf package.tar.gz build/
