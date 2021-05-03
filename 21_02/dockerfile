@@ -92,6 +92,7 @@ RUN ln -s $HOME/linaro-gcc/aarch64-linux-gnu/libc/lib/ld-linux-aarch64.so.1 /lib
     ln -s $HOME/linaro-gcc/aarch64-linux-gnu/libc/lib/libgcc_s.so.1 /lib/libgcc_s.so.1 && \
     ln -s $HOME/linaro-gcc/aarch64-linux-gnu/libc/lib/libc.so.6 /lib/libc.so.6
 
+# 获取protobuf
 RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
     cd $HOME/armnn-devenv && \
     git clone -b v3.12.0 https://gitee.com/arcy/protobuf.git protobuf && \
@@ -99,6 +100,7 @@ RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
     git submodule update --init --recursive && \
     ./autogen.sh
 
+# 构建protobuf_x86
 RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
     cd $HOME/armnn-devenv/protobuf && \
     mkdir x86_64_build && \
@@ -106,6 +108,7 @@ RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
     ../configure --prefix=$HOME/armnn-devenv/google/x86_64_pb_install && \
     make install -j16
 
+# 构建protobuf_arm
 RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
     cd $HOME/armnn-devenv/protobuf && \
     mkdir arm64_build && \
@@ -117,9 +120,10 @@ RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
     --with-protoc=$HOME/armnn-devenv/google/x86_64_pb_install/bin/protoc && \
     make install -j16
 
+# https://dl.bintray.com/boostorg/release/1.64.0/source/boost_1_64_0.tar.bz2
 RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
     cd $HOME/armnn-devenv  && \
-    wget https://dl.bintray.com/boostorg/release/1.64.0/source/boost_1_64_0.tar.bz2 && \
+    wget https://boostorg.jfrog.io/artifactory/main/release/1.64.0/source/boost_1_64_0.tar.bz2 && \
     tar xf boost_1_64_0.tar.bz2  && \
     cd boost_1_64_0  && \
     echo "using gcc : arm : aarch64-linux-gnu-g++ ;" > user_config.jam  && \
@@ -199,4 +203,5 @@ RUN export PATH=$HOME/linaro-gcc/bin:$PATH && \
     -DPROTOBUF_ROOT=$HOME/armnn-devenv/google/x86_64_pb_install \
     -DPROTOBUF_ROOT=$HOME/armnn-devenv/google/x86_64_pb_install/ \
     -DPROTOBUF_LIBRARY_DEBUG=$HOME/armnn-devenv/google/arm64_pb_install/lib/libprotobuf.so.23.0.0 \
-    -DPROTOBUF_LIBRARY_RELEASE=$HOME/armnn-devenv/google/arm64_pb_install/lib/libprotobuf.so.23.0.0
+    -DPROTOBUF_LIBRARY_RELEASE=$HOME/armnn-devenv/google/arm64_pb_install/lib/libprotobuf.so.23.0.0 && \
+    make -j8
